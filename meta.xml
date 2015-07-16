@@ -1,0 +1,8 @@
+<meta>
+	<oop>true</oop>
+	    <script src="truckdata_s.lua" type="server" />
+    <script src="truck_s.lua" type="server" />
+	<script src="truck_c.lua" type="client" />
+
+    <min_mta_version client="1.4"></min_mta_version>
+</meta>
