@@ -338,8 +338,16 @@ local JobPickups = {
 	{-1713.99207, -62.67204, 3.55469}, -- SF Hafen
 }
 
+local TruckSpawnPoints = {
+	{1036.673, 2103.483, 11.406, 348.151}, -- LV
+	{-73.373, -1120.091, 1.661, 98.547}, -- LS Flint County
+	{-1714.998, -73.622, 4.136, 88.928}, -- SF Hafen
+
+
+}
+
 
 
 function Truckjob_getData()
-	return TrailerSpawns, TrailerDestinations, TrailerIDs, JobPickups
+	return TrailerSpawns, TrailerDestinations, TrailerIDs, JobPickups, TruckSpawnPoints
 end
