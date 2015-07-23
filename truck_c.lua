@@ -64,5 +64,3 @@ addEvent("TruckJob_showJobGUI", true)
 addEventHandler("TruckJob_showJobGUI", resourceRoot, showJobGUI)
 
 
-
-
