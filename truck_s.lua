@@ -4,48 +4,240 @@
 --||  DATE:     July 2015
 --\\
 
---//
+
 --[[
+	Notizen:
 	- Anhänger werden beim Scriptstart gespawned
 	- Job muss angenommen werden, danach zwei Möglichkeiten
 		1. Truck ausleihen (5% Miete pro Fahrt)
 		2. eigener Truck (volle Bezahlung)
 	- Bezahlung hängt von Distanz und Schaden am Hänger ab
 	- Zufallsereignisse wie schnelle Fahrten
+	
+	BlipID: 51 - Truck
+			41 - Waypoint
+			52 - Cash
+			
+	Ziele mind. 500m voneinander entfernt
+	Blips nur für Spieler sichtbar
+	Inf über Ziel
+	Spieler stirbt
+	Spieler disconnected
 ]]
---\\
 
 
 local TrailerSpawns, TrailerDestinations, TrailerIDs, JobPickups, TruckSpawnPoints = Truckjob_getData()
 
 
-local TrailerRespawnDelay = 60000*2
+local TrailerRespawnDelay = 60000*0.5
 local moneyMultiplicator = 2
 
 local Trailers = {}
 local Truckers = {}
 
 
-local function setTrailerEnabled(trailer)
+
+local function isTruck(vehicle)
+	local truckIDs = {
+		[403]  = true,
+		[514]  = true,
+		[515]  = true,
+	
+	}
+	if vehicle and isElement(vehicle) and getElementType(vehicle) == "vehicle" then
+		return truckIDs[getElementModel(vehicle)]
+	end
+	return false
+end
+
+local function toggleTrailerBlips(player, state)
+	if state then
+		Truckers[player].bliplist = {}
+		for i,v in pairs(Trailers) do 
+			if not v.destinationMarker then
+				local tx,ty,tz = getElementPosition(i)
+				local blip = createBlip(tx, ty, tz, 51)
+				table.insert(Truckers[player].bliplist, blip)	
+			end
+		end
+	else 
+		if Truckers[player].bliplist then
+			for i,v in pairs(Truckers[player].bliplist) do
+				if isElement(v) then
+					destroyElement(v)
+				end
+			end	
+		end
+	
+	end
+end
+
+
+--//
+--||  setTrailerEnabled
+--||  parameters:
+--||    trailer = the trailer which state should change
+--||  returns: void
+--\\
+
+local function setTrailerEnabled(trailer, player)
+outputChatBox("enabled")
+toggleTrailerBlips(player, false)
 	if not Trailers[trailer].destinationMarker then
 		if not Trailers[trailer].route then
-			calculateRandomRoute(trailer)
-			setElementFrozen(trailer, false)
-			setVehicleDamageProof(trailer, false)
+			if not Truckers[player].trailer then
+				Truckers[player].trailer = trailer
+				Trailers[trailer].trucker = player
+				calculateRandomRoute(trailer)
+				setElementFrozen(trailer, false)
+				setVehicleDamageProof(trailer, false)
+			end
 		end
 	end
 end
 
 
-local function setTrailerDisabled(trailer)
+--//
+--||  setTrailerDisabled
+--||  parameters:
+--||    trailer = the trailer which state should change
+--||  returns: void
+--\\
+
+local function setTrailerDisabled(trailer, player)
+	toggleTrailerBlips(player, true)
 	if Trailers[trailer].destinationMarker then
-		respawnVehicle(trailer)
 		destroyElement(Trailers[trailer].destinationMarker)
 		Trailers[trailer].destinationMarker = nil
+		Trailers[trailer].trucker = nil
+				respawnVehicle(trailer)
 		setElementFrozen(trailer, true)
 		setVehicleDamageProof(trailer, true)
+		Truckers[player].trailer = nil
 	end
 end
+
+
+--//
+--||  calculateRandomRoute
+--||  parameters:
+--||    trailer = the trailer which gets a new route to deliver to
+--||  returns: void
+--\\
+
+function calculateRandomRoute(trailer)
+	local name = Trailers[trailer].name
+	local randomDestination = math.random(1, #TrailerDestinations[name])
+	Trailers[trailer].pos = {unpack({getElementPosition(trailer)})}
+	Trailers[trailer].destinationMarker = createMarker(unpack(TrailerDestinations[name][randomDestination]))
+	local blip = createBlipAttachedTo(Trailers[trailer].destinationMarker, 41)
+	setElementParent(blip, Trailers[trailer].destinationMarker)
+	addEventHandler("onMarkerHit", Trailers[trailer].destinationMarker, function(hitElement)
+		if hitElement == trailer then
+			local player = getVehicleController(trailer)
+			if player then
+				local startx, starty, startz = unpack(Trailers[trailer].pos)
+				local trailerx, trailery, trailerz = getElementPosition(trailer)
+				local distance = getDistanceBetweenPoints3D(startx, starty, startz, trailerx, trailery, trailerz)
+				local money = math.floor(distance*moneyMultiplicator)
+				if Truckers[player].rented then
+					money = math.floor(money/100*95)
+				end
+				givePlayerMoney(player, money)
+				outputInfo("Du hast "..money.."$ verdient.", player, "success")
+			end
+			setTrailerDisabled(trailer, player)
+		end
+	end)
+end
+
+
+--//
+--||  stopJob
+--||  parameters:
+--||    player = the player who should stop the truck job
+--||  returns: void
+--\\
+
+local function stopJob(player)
+	if Truckers[player].truck then
+		local truck = Truckers[player].truck
+		local trailer = getVehicleTowedByVehicle(truck)
+		
+		if trailer then
+			setTrailerDisabled(trailer, player)
+		end
+		
+		if Truckers[player].rented then
+			destroyElement(truck)
+		end
+	end
+	toggleTrailerBlips(player, false)
+	Truckers[player] = nil
+	outputInfo("Du hast den Job beendet.", player, "success")
+	triggerClientEvent(player, "TruckJob_setPlayerData", resourceRoot, "inJob", false)
+end
+
+addEvent("TruckJob_toggle", true)
+addEventHandler("TruckJob_toggle", resourceRoot, function()
+	if not Truckers[client] then
+		Truckers[client] = {}
+		outputInfo("Du hast den Job gestartet.", client, "success")
+		toggleTrailerBlips(client, true)
+		triggerClientEvent(client, "TruckJob_setPlayerData", resourceRoot, "inJob", true)
+	else
+		stopJob(client)
+	end
+end)
+
+
+addEvent("TruckJob_rentTruck", true)
+addEventHandler("TruckJob_rentTruck", resourceRoot, function(index)
+	if Truckers[client]then
+		if not Truckers[client].truck then
+			local x, y, z, rz = unpack(TruckSpawnPoints[index])
+			local px, py, _ = getElementPosition(client)
+			if getDistanceBetweenPoints2D(x, y, px, py) < 200 then
+				local truck = createVehicle(514, x, y, z, 0, 0, rz)
+					warpPedIntoVehicle(client, truck)
+					setVehicleEngineState(truck, true)
+					addEventHandler("onVehicleStartEnter", truck, function(player, seat)
+						if seat == 0 and Truckers[player] then
+							if Truckers[player].truck ~= truck then
+								cancelEvent()
+							elseif Truckers[player].jobStopTimer and isTimer(Truckers[player].jobStopTimer) then
+								killTimer(Truckers[player].jobStopTimer)
+								outputInfo("Willkommen zurück.", player, "success")
+							end
+						end
+					end)
+					addEventHandler("onVehicleExit", truck, function(player, seat)
+						if seat == 0 and Truckers[player] and Truckers[player].truck == truck then
+							if Truckers[player].jobStopTimer and isTimer(Truckers[player].jobStopTimer) then
+								killTimer(Truckers[player].jobStopTimer)
+							end
+							Truckers[player].jobStopTimer = setTimer(stopJob, 30000, 1, player)
+							outputInfo("Du hast 30 Sekunden Zeit um wieder in den Truck zu steigen.", player, "warning")
+						end
+					end)
+				
+				Truckers[client].truck = truck
+				Truckers[client].rented = true
+				
+				outputInfo("Truck erfolgreich gemietet - viel Spaß!", client, "success")
+			end
+		else
+			outputInfo("Du hast bereits einen Truck!", client, "error")
+		end
+	else
+		outputInfo("Du bist kein Trucker.", client, "error")
+	end
+end)
+
+
+--//
+--||  spawning loops
+--\\
 
 for name, spawns in pairs(TrailerSpawns) do 
 	for index,point in ipairs(spawns) do 
@@ -57,13 +249,41 @@ for name, spawns in pairs(TrailerSpawns) do
 		--createBlipAttachedTo(trailer)
 		setVehicleDamageProof(trailer, true)
 		setElementFrozen(trailer, true)
+		toggleVehicleRespawn(trailer, true)
 		setVehicleIdleRespawnDelay(trailer, TrailerRespawnDelay)
 		setVehicleRespawnPosition(trailer, point[1], point[2], point[3], 0, 0, point[4])
 		addEventHandler("onTrailerAttach", trailer, function(truck)
 			local player = getVehicleController(truck)
 			if player then
+			if not Truckers[player] or (Truckers[player].trailer and Truckers[player].trailer ~= source) then 
+				outputInfo("Du darfst diesen Anhänger nicht nehmen.", player, "error")
+				detachTrailerFromVehicle(truck)  
+				setElementPosition(trailer, 0, 0, 0)
+				setTimer(function() respawnVehicle(trailer) end, 5000, 1)
+			return false end
+			
+				if not Truckers[player].truck then
+					if isTruck(truck) then
+						Truckers[player].truck = truck
+					end
+				end
 				if Truckers[player].truck == truck then
-					setTrailerEnabled(trailer)			
+					setTrailerEnabled(source, player)					
+				end	
+			end	
+			addEventHandler("onVehicleRespawn", source, function()
+			if getVehicleController(source) then return cancelEvent() end
+				if Trailers[source].trucker then
+					setTrailerDisabled(source, Trailers[source].trucker)
+				end	
+			end)
+		end)
+		addEventHandler("onTrailerDetach", trailer, function(truck)
+			local player = getVehicleController(truck)
+			if player then
+			if not Truckers[player] then return false end
+				if Truckers[player].truck == truck then
+					outputInfo("Du musst den Anhänger innerhalb von "..(TrailerRespawnDelay/60000).." Minuten wieder anhängen.", player, "warning")	
 				end	
 			end	
 		end)
@@ -72,6 +292,8 @@ end
 
 for index, point in pairs(JobPickups) do
 	local pick = createPickup(point[1], point[2], point[3], 3, 1274, 0)
+	local blip = createBlip(point[1], point[2], point[3], 52)
+		setElementParent(blip, pick)
 	addEventHandler("onPickupHit", pick, function(hitElement)
 			if not getPedOccupiedVehicle(hitElement) then
 				triggerClientEvent(hitElement, "TruckJob_showJobGUI", resourceRoot, index)
@@ -80,97 +302,9 @@ for index, point in pairs(JobPickups) do
 end
 
 
-
-local function stopJob(player)
-	if Truckers[player].rented and Truckers[player].truck then
-		local truck = Truckers[player].truck
-		local trailer = getVehicleTowedByVehicle(truck)
-		if trailer then
-			setTrailerDisabled(trailer)
-		end
-		destroyElement(truck)	
-	end
-	Truckers[player] = nil
-	outputChatBox("Job beendet", player)
-	triggerClientEvent(player, "TruckJob_setPlayerData", resourceRoot, "inJob", false)
-end
-
-addEvent("TruckJob_toggle", true)
-addEventHandler("TruckJob_toggle", resourceRoot, function()
-	if not Truckers[client] then
-		Truckers[client] = {}
-		outputChatBox("Job gestartet", client)
-		triggerClientEvent(client, "TruckJob_setPlayerData", resourceRoot, "inJob", true)
-	else
-		stopJob(player)
-	end
-end)
-
-
-addEvent("TruckJob_rentTruck", true)
-addEventHandler("TruckJob_rentTruck", resourceRoot, function(index)
-	if Truckers[client] then
-		local x, y, z, rz = unpack(TruckSpawnPoints[index])
-		local px, py, _ = getElementPosition(client)
-		if getDistanceBetweenPoints2D(x, y, px, py) < 200 then
-			local truck = createVehicle(514, x, y, z, 0, 0, rz)
-				warpPedIntoVehicle(client, truck)
-				setVehicleEngineState(truck, true)
-				addEventHandler("onVehicleStartEnter", truck, function(player, seat)
-					if seat == 0 and Truckers[player] then
-						if Truckers[player].truck ~= truck then
-							cancelEvent()
-						elseif Truckers[player].jobStopTimer and isTimer(Truckers[player].jobStopTimer) then
-							killTimer(Truckers[player].jobStopTimer)
-							outputChatBox("Willkommen zurück.", player)
-						end
-					end
-				end)
-				addEventHandler("onVehicleExit", truck, function(player, seat)
-					if seat == 0 and Truckers[player] and Truckers[player].truck == truck then
-						if Truckers[player].jobStopTimer and isTimer(Truckers[player].jobStopTimer) then
-							killTimer(Truckers[player].jobStopTimer)
-						end
-						Truckers[player].jobStopTimer = setTimer(stopJob, 3000, 1, player)
-						outputChatBox("Du hast 30 Sekunden Zeit um wieder in den Truck zu steigen.", player)
-					end
-				end)
-			
-			Truckers[client].truck = truck
-			Truckers[client].rented = true
-			
-			outputChatBox("Truck gemietet", client)
-		end
-	else
-		outputChatBox("Du bist kein Trucker", client)
-	end
-end)
-
-
-
-function calculateRandomRoute(trailer)
-	local name = Trailers[trailer].name
-	local randomDestination = math.random(1, #TrailerDestinations[name])
-	Trailers[trailer].pos = {unpack({getElementPosition(trailer)})}
-	Trailers[trailer].destinationMarker = createMarker(unpack(TrailerDestinations[name][randomDestination]))
-	createBlipAttachedTo(Trailers[trailer].destinationMarker)
-	addEventHandler("onMarkerHit", Trailers[trailer].destinationMarker, function(hitElement)
-		if hitElement == trailer then
-			local player = getVehicleController(trailer)
-			if player then
-				local startx, starty, startz = unpack(Trailers[trailer].pos)
-				local trailerx, trailery, trailerz = getElementPosition(trailer)
-				local distance = getDistanceBetweenPoints3D(startx, starty, startz, trailerx, trailery, trailerz)
-				local money = math.floor(distance*moneyMultiplicator)
-				givePlayerMoney(player, money)
-				outputChatBox("Du hast "..money.."$ verdient.")
-			end
-			setTrailerDisabled(trailer)
-		end
-	end)
-end
-
-
+--//
+--||  DEBUG
+--\\
 
 local function getPos(player)
 	local veh = getPedOccupiedVehicle(player)
@@ -182,4 +316,4 @@ local function getPos(player)
 
 end
 addCommandHandler("pos", getPos)
-
+outputDebugString("restart")
