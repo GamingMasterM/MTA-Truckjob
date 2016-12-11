@@ -118,7 +118,7 @@ function calculateRandomRoute(trailer, player)
 			end
 		local text = ("Diese Ware muss nach %s (%s)."):format(getZoneName(markerX, markerY, markerZ), getZoneName(markerX, markerY, markerZ, true))
 		outputInfo(text, player, "info")
-		if math.random(0, 50) then
+		if math.random(0, 50) == 0 then
 			outputInfo("Du bekommst für diese Fahrt das doppelte Geld!", player, "success")
 			Trailers[trailer].bonus = true
 		end
